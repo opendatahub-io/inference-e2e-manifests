@@ -144,7 +144,8 @@ and the allowlisted ServiceAccount, to match the test namespace and service name
 
 Requirements:
 - OpenShift with RHOAI 3.6 and DSC `kserve.modelExpress: Managed`.
-- 2 GPUs with `rdma/rdma_shared_device_ib`.
+- 2 GPUs with an RDMA device. The manifest requests `rdma/rdma_shared_device_ib`;
+  the suite's `--rdma-resource` requests the cluster's device-plugin resource instead.
 - `aipcc-pull-secret` in the test namespace for the engine image
   `quay.io/aipcc/rhaiis/cuda-ubi9:3.6.0-1793259641`. The default vLLM preset
   image does not include the `modelexpress` client.
