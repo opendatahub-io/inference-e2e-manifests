@@ -30,8 +30,12 @@ spec:
         env:
           # Shrink the on-GPU KV cache so modest traffic overflows to the CPU
           # tier and then spills to the filesystem tier (/mnt/kv-cache-0).
+          # max-model-len must fit the on-GPU KV budget of a 16GB T4 at
+          # utilization 0.2 (~1.2-1.5GB free after weights and overhead,
+          # ~10k tokens): 6000 tokens ~ 640MiB clears it with margin and
+          # remains far above the ~110-token test sequences.
           - name: VLLM_ADDITIONAL_ARGS
-            value: "--gpu-memory-utilization 0.2 --max-model-len 16000"
+            value: "--gpu-memory-utilization 0.2 --max-model-len 6000"
         resources:
           limits:
             cpu: '4'

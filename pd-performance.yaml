@@ -138,6 +138,8 @@ spec:
     route: {}
     scheduler:
       template:
+        imagePullSecrets:
+        - name: rhai-pull-secret
         containers:
         - name: main
           args:
