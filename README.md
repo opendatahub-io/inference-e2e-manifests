@@ -109,6 +109,7 @@ In 3.4 this was a single `precise-prefix-cache-scorer` plugin.
 | `lora-single.yaml` | Single LoRA adapter (HF) | template + stubs |
 | `lora-multi.yaml` | Multiple LoRA adapters with maxRank/maxAdapters | template + stubs |
 | `maas-single-gpu.yaml` | `single-gpu` served through MaaS (see below) | template + stubs |
+| `modelexpress-p2p.yaml` | ModelExpress native loading: server + 1-replica service the suite scales out over P2P (see below) | template + stubs |
 
 ### MaaS (RHOAI 3.5)
 
@@ -125,3 +126,26 @@ routes on the MaaS gateway), plus:
 The policy and subscription reference the model in `llm-conformance-test`. The
 cluster must have the RHOAI 3.5 MaaS components (RHCL/Kuadrant, `maas-api`) and
 both gateways installed.
+
+### ModelExpress (RHOAI 3.6)
+
+`modelexpress-p2p.yaml` is a `ModelExpressServer` plus a one-replica
+LLMInferenceService in ModelExpress native mode. The e2e suite scales the
+service to a second replica, which loads its weights from the first over
+P2P, and probes the server's TLS, token auth and NetworkPolicy.
+
+| Resource | Configuration |
+|----------|---------------|
+| `ModelExpressServer` `modelexpress` | Kubernetes metadata backend; TLS from the OpenShift service CA; `security.mode: enforce` with audience `modelexpress` and `tenantIsolation: enforce`; allowlist naming the engine ServiceAccount (`<service>-kserve`); restrictive NetworkPolicy (`allowFrom: [podSelector: {}]`) |
+| `LLMInferenceService` `modelexpress-p2p` | `exp-modelexpress-mode: native`, server address and token audience, CA bundle from `openshift-service-ca.crt`; `IPC_LOCK` and `rdma/rdma_shared_device_ib` for NIXL over RDMA; kept off SR-IOV-configured nodes |
+
+The suite rewrites the namespace in the address annotation and the allowlist,
+and the allowlisted ServiceAccount, to match the test namespace and service name.
+
+Requirements:
+- OpenShift with RHOAI 3.6 and DSC `kserve.modelExpress: Managed`.
+- 2 GPUs with an RDMA device. The manifest requests `rdma/rdma_shared_device_ib`;
+  the suite's `--rdma-resource` requests the cluster's device-plugin resource instead.
+- `aipcc-pull-secret` in the test namespace for the engine image
+  `quay.io/aipcc/rhaiis/cuda-ubi9:3.6.0-1793259641`. The default vLLM preset
+  image does not include the `modelexpress` client.
