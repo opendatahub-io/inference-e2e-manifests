@@ -110,6 +110,7 @@ In 3.4 this was a single `precise-prefix-cache-scorer` plugin.
 | `lora-multi.yaml` | Multiple LoRA adapters with maxRank/maxAdapters | template + stubs |
 | `maas-single-gpu.yaml` | `single-gpu` served through MaaS (see below) | template + stubs |
 | `modelexpress-p2p.yaml` | ModelExpress native loading: server + 1-replica service the suite scales out over P2P (see below) | template + stubs |
+| `modelexpress-p2p-xks.yaml` | `modelexpress-p2p` for xKS without RDMA: plaintext server, P2P over TCP (see below) | template + stubs |
 
 ### MaaS (RHOAI 3.5)
 
@@ -149,3 +150,15 @@ Requirements:
 - `aipcc-pull-secret` in the test namespace for the engine image
   `quay.io/aipcc/rhaiis/cuda-ubi9:3.6.0-1793259641`. The default vLLM preset
   image does not include the `modelexpress` client.
+
+`modelexpress-p2p-xks.yaml` is the same test for RHAII on xKS clusters
+without RDMA, such as the AKS GPU nightly:
+
+| Resource | Configuration |
+|----------|---------------|
+| `ModelExpressServer` `modelexpress` | As above, but plaintext gRPC (xKS has no service CA to issue the server certificate), the compatibility NetworkPolicy (no `allowFrom`), and `rhai-pull-secret` for the server image |
+| `LLMInferenceService` `modelexpress-p2p-xks` | `exp-modelexpress-mode: native` with an `http://` server address; the RHAII preset vLLM image, which includes the `modelexpress` client; `UCX_TLS=tcp,cuda_copy` and `UCX_PROTO_INFO=y`, so P2P runs over the pod network |
+
+Requirements: RHAII 3.6 installed with
+`components.kserve.spec.modelExpress.managementState: Managed`, and 2 GPUs.
+The suite's TLS and NetworkPolicy phases skip for this manifest.
