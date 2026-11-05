@@ -109,6 +109,7 @@ In 3.4 this was a single `precise-prefix-cache-scorer` plugin.
 | `lora-single.yaml` | Single LoRA adapter (HF) | template + stubs |
 | `lora-multi.yaml` | Multiple LoRA adapters with maxRank/maxAdapters | template + stubs |
 | `maas-single-gpu.yaml` | `single-gpu` served through MaaS (see below) | template + stubs |
+| `batch-gateway-async-sql.yaml` | vLLM-simulator `LLMInferenceService` + `LLMBatchGateway`, async batches over PostgreSQL (see below) | template + stubs |
 
 ### MaaS (RHOAI 3.5)
 
@@ -125,3 +126,49 @@ routes on the MaaS gateway), plus:
 The policy and subscription reference the model in `llm-conformance-test`. The
 cluster must have the RHOAI 3.5 MaaS components (RHCL/Kuadrant, `maas-api`) and
 both gateways installed.
+
+### Batch Gateway (`batch-gateway-async-sql.yaml`)
+
+One `LLMInferenceService` plus one `LLMBatchGateway` that serves the OpenAI
+Batch API (`/v1/files`, `/v1/batches`), using async dispatch over PostgreSQL SQL
+queues — Postgres holds both the control-plane state and the request/result
+queues, so no Redis is involved. The documents, in apply order:
+
+| Resource | Description |
+|----------|-------------|
+| `LLMInferenceServiceConfig` | vLLM inference simulator (`llm-d-inference-sim` v0.12.0, the version RHOAI 3.6 ships): CPU-only, no model weights, TLS from the controller-mounted certificate |
+| `LLMInferenceService` | Model under test: the simulator, served via the config's `baseRef`; no GPU |
+| `batch-gateway-postgres` Service + StatefulSet | Control-plane state and SQL async queues (`emptyDir`, disposable). The volume is mounted at `/var/lib/postgresql`, not at `PGDATA`: under OpenShift's random UID, `initdb` cannot `chmod` a kubelet-owned volume root and the pod crash-loops. |
+| `batch-gateway-seaweedfs` Deployment + Service | S3-compatible file storage for batch input/output files |
+| `batch-gateway-secrets` Secret | `postgresql-url`, `s3-secret-access-key`, `inference-api-key` |
+| `LLMBatchGateway` | API server, processor (`modelGateways` + `asyncConfig.sql`), GC |
+
+The test suite deletes these in reverse order, so the `LLMBatchGateway` stays
+last.
+
+`spec.processor.asyncConfig.inferenceGateway.url` is the one field that does not
+port across platforms, so the conformance suite rewrites it at deploy time
+(along with any `sql.queuesConfig[].igwBaseURL`) from the gateway Service it
+discovers via the `gateway.networking.k8s.io/gateway-name` label:
+
+| Platform | Derived dispatch URL | TLS the suite sets |
+|----------|----------------------|--------------------|
+| RHOAI 3.6, AIGateway component | `https://data-science-gateway-<class>.<ingress-ns>.svc.cluster.local:443/<test-ns>/<llmisvc>` | `asyncConfig.tls.insecureSkipVerify: true` — the gateway certificate is signed by the OpenShift service CA, which the batch components do not trust |
+| Install that still exposes Istio's gateway | `http://inference-gateway-istio.redhat-ods-applications.svc.cluster.local:80/<test-ns>/<llmisvc>` | none (the manifest's `tls` block is left as written) |
+
+The value checked in here is therefore only a starting point for a manual
+`kubectl apply`. The suite's own override is
+`validation.batchGateway.dispatchUrl` in the test case, which is used verbatim
+and skips discovery. Find the gateway Service with:
+
+```bash
+kubectl get svc -A -l gateway.networking.k8s.io/gateway-name \
+  -o custom-columns=NAME:.metadata.name,NS:.metadata.namespace,PORTS:.spec.ports[*].port
+```
+
+Platform requirement: the `batch.llm-d.ai` CRD and the batch gateway operator
+must be enabled on the cluster
+(`spec.components.aigateway.batchGateway.managementState: Managed` on the
+`DataScienceCluster` — see the conformance suite's
+`docs/adding-a-batch-test-case.md`). Nothing beyond the backing Postgres and S3
+stores is installed by this manifest.
